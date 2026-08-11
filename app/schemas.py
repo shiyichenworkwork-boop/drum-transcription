@@ -34,6 +34,7 @@ class JobFiles(BaseModel):
     original: str | None = None
     drums: str | None = None
     no_drums: str | None = None
+    midi: str | None = None
 
 
 class JobResponse(BaseModel):
@@ -51,6 +52,8 @@ class JobResponse(BaseModel):
     storage_bytes: int
     model_name: str
     output_format: str | None = None
+    midi_event_count: int = 0
+    midi_tempo_bpm: float | None = None
     created_at: str
     updated_at: str
     started_at: str | None = None

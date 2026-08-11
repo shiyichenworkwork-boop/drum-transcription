@@ -21,6 +21,7 @@ from app.engine import (
     SeparationEngine,
     SeparationError,
 )
+from app.midi import DrumTranscriber, MidiTranscriptionError
 from app.schemas import ACTIVE_STATUSES, JobStatus
 
 
@@ -43,6 +44,8 @@ class JobManager:
         self._current_job_id: str | None = None
         self._stopping = False
         self._compression_lock = asyncio.Lock()
+        self._midi_lock = asyncio.Lock()
+        self.transcriber = DrumTranscriber(settings)
 
     async def start(self) -> None:
         self._stopping = False
@@ -105,6 +108,9 @@ class JobManager:
             warnings_json="[]",
             drums_path=None,
             no_drums_path=None,
+            midi_path=None,
+            midi_event_count=0,
+            midi_tempo_bpm=None,
             storage_bytes=record.input_size_bytes,
             cancel_requested=0,
         )
@@ -166,6 +172,8 @@ class JobManager:
                 total_size = record.input_size_bytes + sum(
                     path.stat().st_size for path in destinations
                 )
+                if record.midi_path and Path(record.midi_path).is_file():
+                    total_size += Path(record.midi_path).stat().st_size
                 updated = self.repository.update(
                     job_id,
                     drums_path=str(destinations[0]),
@@ -181,6 +189,33 @@ class JobManager:
             finally:
                 for part_path in temporary:
                     part_path.unlink(missing_ok=True)
+
+    async def generate_midi(self, job_id: str) -> JobRecord:
+        async with self._midi_lock:
+            record = self.repository.require(job_id)
+            if JobStatus(record.status) != JobStatus.COMPLETED:
+                raise JobConflictError("只有已完成分轨的任务可以生成 MIDI。")
+            if record.midi_path and Path(record.midi_path).is_file():
+                return record
+            if not record.drums_path or not Path(record.drums_path).is_file():
+                raise JobConflictError("鼓轨文件不存在。")
+
+            job_dir = self.settings.jobs_dir / job_id
+            destination = job_dir / "outputs" / "drums.mid"
+            try:
+                result = await self.transcriber.transcribe(
+                    Path(record.drums_path), destination
+                )
+            except MidiTranscriptionError as exc:
+                raise JobConflictError(str(exc)) from exc
+            return self.repository.update(
+                job_id,
+                stage=f"MIDI 已生成 · {result.event_count} 个鼓点",
+                midi_path=str(result.path.resolve()),
+                midi_event_count=result.event_count,
+                midi_tempo_bpm=result.tempo_bpm,
+                storage_bytes=directory_size(job_dir),
+            )
 
     async def delete(self, job_id: str) -> JobRecord:
         record = self.repository.require(job_id)

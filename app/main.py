@@ -56,6 +56,7 @@ def job_response(record: JobRecord) -> JobResponse:
     original_exists = Path(record.original_path).is_file()
     drums_exists = bool(record.drums_path and Path(record.drums_path).is_file())
     no_drums_exists = bool(record.no_drums_path and Path(record.no_drums_path).is_file())
+    midi_exists = bool(record.midi_path and Path(record.midi_path).is_file())
     return JobResponse(
         id=record.id,
         original_name=record.original_name,
@@ -73,6 +74,8 @@ def job_response(record: JobRecord) -> JobResponse:
             if record.drums_path
             else None
         ),
+        midi_event_count=record.midi_event_count,
+        midi_tempo_bpm=record.midi_tempo_bpm,
         created_at=record.created_at,
         updated_at=record.updated_at,
         started_at=record.started_at,
@@ -84,6 +87,7 @@ def job_response(record: JobRecord) -> JobResponse:
             original=_file_url(record.id, "original", original_exists),
             drums=_file_url(record.id, "drums", drums_exists),
             no_drums=_file_url(record.id, "no_drums", no_drums_exists),
+            midi=_file_url(record.id, "midi", midi_exists),
         ),
     )
 
@@ -103,6 +107,10 @@ def _safe_job_file(settings: Settings, record: JobRecord, kind: str) -> tuple[Pa
         suffix = path.suffix.lower()
         filename = f"{Path(record.original_name).stem}-no-drums{suffix}"
         media_type = _audio_media_type(suffix)
+    elif kind == "midi" and record.midi_path:
+        path = Path(record.midi_path)
+        filename = f"{Path(record.original_name).stem}-drums.mid"
+        media_type = "audio/midi"
     else:
         raise HTTPException(status_code=404, detail="文件不存在。")
 
@@ -317,6 +325,13 @@ def create_app(
         except JobConflictError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
+    @app.post("/api/jobs/{job_id}/midi", response_model=JobResponse)
+    async def generate_midi(job_id: str) -> JobResponse:
+        try:
+            return job_response(await manager.generate_midi(job_id))
+        except JobConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
     @app.delete("/api/jobs/{job_id}", response_model=ActionResponse)
     async def delete_job(job_id: str) -> ActionResponse:
         try:
@@ -329,7 +344,7 @@ def create_app(
     async def get_job_file(
         request: Request,
         job_id: str,
-        file_kind: Literal["original", "drums", "no_drums"],
+        file_kind: Literal["original", "drums", "no_drums", "midi"],
         download: bool = Query(False),
     ) -> Response:
         record = repository.require(job_id)

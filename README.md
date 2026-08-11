@@ -4,6 +4,7 @@
 
 - `drums.mp3`：鼓轨
 - `no_drums.mp3`：去鼓伴奏
+- `drums.mid`：可选的 General MIDI 鼓点文件
 
 音频只保存在本机，服务仅监听 `127.0.0.1`。
 
@@ -31,6 +32,7 @@
 1. 点击“选择音频”。
 2. 点击“开始分离鼓轨”。
 3. 等待处理完成，试听或下载鼓轨和去鼓伴奏。
+4. 如需节奏编辑，点击“生成 MIDI”下载鼓组 MIDI。
 
 第一次启动会安装运行环境。第一次提交任务会下载 `htdemucs_ft` 模型，等待时间会比后续任务长。
 
@@ -42,6 +44,7 @@
 - 固定使用 CPU 和 `htdemucs_ft` 高质量模型。
 - 同一时间处理一个任务，其余任务进入队列。
 - 输出为 44.1kHz、双声道、256 kbps MP3。5 分钟音频的每条结果通常约 10MB。
+- MIDI 使用本地起音检测，将事件映射为底鼓 36、军鼓 38、闭镲 42，并写入力度与估算 BPM。
 
 当前 Intel i5 iMac 的预计处理速度约为音频时长的 6–9 倍。实际速度会受到编曲复杂度、系统负载和首次模型加载影响。
 
@@ -64,6 +67,7 @@ data/
 
 任务文件会保留到网页中手动删除。处理中间文件会在成功、失败或取消后清理。
 旧版本生成的 WAV 会继续保留，可在任务卡片点击“压缩旧文件”直接转换，无需重新运行分离模型。
+MIDI 功能处于 Beta 阶段。清晰鼓轨通常可以形成可编辑的节奏草稿；连击、弱音、开闭镲变化和强混响可能需要在 DAW 中人工修正。
 
 ## API
 
@@ -78,8 +82,9 @@ GET    /api/jobs/{id}
 POST   /api/jobs/{id}/cancel
 POST   /api/jobs/{id}/retry
 POST   /api/jobs/{id}/compress
+POST   /api/jobs/{id}/midi
 DELETE /api/jobs/{id}
-GET    /api/jobs/{id}/files/{original|drums|no_drums}
+GET    /api/jobs/{id}/files/{original|drums|no_drums|midi}
 ```
 
 ## 测试

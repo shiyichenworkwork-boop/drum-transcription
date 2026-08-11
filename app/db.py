@@ -39,6 +39,9 @@ class JobRecord:
     warnings_json: str
     drums_path: str | None
     no_drums_path: str | None
+    midi_path: str | None
+    midi_event_count: int
+    midi_tempo_bpm: float | None
     cancel_requested: int
 
     @property
@@ -90,6 +93,9 @@ class JobRepository:
                     warnings_json TEXT NOT NULL DEFAULT '[]',
                     drums_path TEXT,
                     no_drums_path TEXT,
+                    midi_path TEXT,
+                    midi_event_count INTEGER NOT NULL DEFAULT 0,
+                    midi_tempo_bpm REAL,
                     cancel_requested INTEGER NOT NULL DEFAULT 0
                 );
                 CREATE INDEX IF NOT EXISTS idx_jobs_created_at
@@ -98,6 +104,18 @@ class JobRepository:
                     ON jobs(cache_key, status);
                 """
             )
+            columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(jobs)").fetchall()
+            }
+            if "midi_path" not in columns:
+                connection.execute("ALTER TABLE jobs ADD COLUMN midi_path TEXT")
+            if "midi_event_count" not in columns:
+                connection.execute(
+                    "ALTER TABLE jobs ADD COLUMN midi_event_count INTEGER NOT NULL DEFAULT 0"
+                )
+            if "midi_tempo_bpm" not in columns:
+                connection.execute("ALTER TABLE jobs ADD COLUMN midi_tempo_bpm REAL")
 
     def create(
         self,
@@ -179,6 +197,9 @@ class JobRepository:
             "warnings_json",
             "drums_path",
             "no_drums_path",
+            "midi_path",
+            "midi_event_count",
+            "midi_tempo_bpm",
             "storage_bytes",
             "cancel_requested",
         }
@@ -272,4 +293,3 @@ class JobRepository:
                 values,
             ).fetchall()
         return [row["id"] for row in rows]
-

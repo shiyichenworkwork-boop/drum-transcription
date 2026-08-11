@@ -124,6 +124,9 @@ function createCard(job) {
   card.querySelector(".cancel-button").addEventListener("click", () => act(job.id, "cancel"));
   card.querySelector(".retry-button").addEventListener("click", () => act(job.id, "retry"));
   card.querySelector(".compress-button").addEventListener("click", () => compressJob(job.id));
+  card.querySelector(".midi-generate-button").addEventListener("click", (event) => {
+    generateMidi(job.id, event.currentTarget);
+  });
   card.querySelector(".delete-button").addEventListener("click", () => removeJob(job.id));
   cards.set(job.id, card);
   return card;
@@ -172,12 +175,45 @@ function updateCard(card, job) {
     setAudioSource(card.querySelector(".audio-no-drums"), job.files.no_drums);
     card.querySelector(".download-drums").href = `${job.files.drums}?download=true`;
     card.querySelector(".download-no-drums").href = `${job.files.no_drums}?download=true`;
+    const midiReady = Boolean(job.files.midi);
+    const midiButton = card.querySelector(".midi-generate-button");
+    const midiDownload = card.querySelector(".midi-download");
+    midiButton.hidden = midiReady;
+    midiDownload.hidden = !midiReady;
+    if (midiReady) {
+      midiDownload.href = `${job.files.midi}?download=true`;
+      card.querySelector(".midi-meta").textContent = [
+        `${job.midi_event_count} 个鼓点`,
+        job.midi_tempo_bpm ? `${job.midi_tempo_bpm} BPM` : null,
+        "GM 鼓组",
+      ].filter(Boolean).join(" · ");
+    } else {
+      card.querySelector(".midi-meta").textContent = "底鼓 36 · 军鼓 38 · 闭镲 42";
+    }
   }
 
   card.querySelector(".cancel-button").hidden = !active;
   card.querySelector(".retry-button").hidden = !["failed", "cancelled"].includes(job.status);
   card.querySelector(".compress-button").hidden = !(job.status === "completed" && job.output_format === "wav");
   card.querySelector(".delete-button").hidden = active;
+}
+
+async function generateMidi(jobId, button) {
+  button.disabled = true;
+  button.textContent = "正在识别鼓点…";
+  uploadNotice.textContent = "正在分析鼓轨并生成 MIDI，请稍候…";
+  try {
+    const response = await fetch(`/api/jobs/${jobId}/midi`, { method: "POST" });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.detail || "MIDI 生成失败。");
+    uploadNotice.textContent = `MIDI 已生成：${payload.midi_event_count} 个鼓点，${payload.midi_tempo_bpm} BPM。`;
+    await refreshJobs();
+  } catch (error) {
+    uploadNotice.textContent = error.message || "MIDI 生成失败，请重试。";
+  } finally {
+    button.disabled = false;
+    button.textContent = "生成 MIDI";
+  }
 }
 
 async function compressJob(jobId) {

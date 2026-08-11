@@ -80,7 +80,7 @@
         <div class="job-list" id="job-list"></div>
       </section>
 
-      <footer>高质量模式 · HTDemucs FT · 输出 MP3 256 kbps</footer>
+      <footer>高质量模式 · HTDemucs FT · MP3 256 kbps · 鼓 MIDI Beta</footer>
     </main>
 
     <template id="job-template">
@@ -117,6 +117,15 @@
             <div class="player-label"><strong>去鼓伴奏</strong><span>移除鼓声 · <i class="format-label">轻量 MP3</i></span></div>
             <audio class="audio-no-drums" controls preload="metadata"></audio>
             <a class="download-link download-no-drums">下载</a>
+          </div>
+          <div class="midi-row">
+            <span class="midi-badge" aria-hidden="true">MIDI</span>
+            <div class="midi-copy">
+              <strong>鼓点 MIDI <i>Beta</i></strong>
+              <span class="midi-meta">底鼓 · 军鼓 · 闭镲</span>
+            </div>
+            <button class="midi-generate-button" type="button">生成 MIDI</button>
+            <a class="download-link midi-download" hidden>下载 .mid</a>
           </div>
         </div>
 

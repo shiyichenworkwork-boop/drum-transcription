@@ -59,6 +59,15 @@ def test_upload_complete_stream_cache_and_delete(settings) -> None:
         assert mp3_download.headers["content-type"].startswith("audio/mpeg")
         assert ".mp3" in mp3_download.headers["content-disposition"]
 
+        midi = client.post(f"/api/jobs/{job_id}/midi")
+        assert midi.status_code == 200
+        assert midi.json()["files"]["midi"].endswith("/midi")
+        midi_download = client.get(midi.json()["files"]["midi"] + "?download=true")
+        assert midi_download.status_code == 200
+        assert midi_download.headers["content-type"].startswith("audio/midi")
+        assert midi_download.content.startswith(b"MThd")
+        assert ".mid" in midi_download.headers["content-disposition"]
+
         listing = client.get("/api/jobs").json()
         assert len(listing["jobs"]) == 1
         assert listing["total_storage_bytes"] > len(audio)
