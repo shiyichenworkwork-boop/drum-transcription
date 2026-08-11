@@ -1,0 +1,31 @@
+[project]
+name = "local-drum-separator"
+version = "0.1.0"
+description = "本地运行的高质量鼓轨分离网页工具"
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+  "demucs==4.0.1",
+  "fastapi>=0.115,<1",
+  "filetype>=1.2,<2",
+  "imageio-ffmpeg>=0.6,<1",
+  "numpy>=1.24,<2; sys_platform == 'darwin' and platform_machine == 'x86_64'",
+  "python-multipart>=0.0.20,<1",
+  "torch==2.2.2; sys_platform == 'darwin' and platform_machine == 'x86_64'",
+  "torchaudio==2.2.2; sys_platform == 'darwin' and platform_machine == 'x86_64'",
+  "uvicorn>=0.34,<1",
+]
+
+[dependency-groups]
+dev = [
+  "httpx>=0.28,<1",
+  "pytest>=8.3,<9",
+  "pytest-asyncio>=0.25,<1",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.uv]
+package = false

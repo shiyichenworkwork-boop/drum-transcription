@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#151412" />
+    <title>鼓轨分离</title>
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand-icon" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+          <div>
+            <h1>鼓轨分离</h1>
+            <p>本地处理，音频不会上传到网络</p>
+          </div>
+        </div>
+        <span class="local-status"><i></i>服务已连接</span>
+      </header>
+
+      <section class="file-mode-card" id="file-mode-card" hidden>
+        <span class="file-mode-icon" aria-hidden="true">▶</span>
+        <h2>请先启动本地服务</h2>
+        <p>回到“音乐”文件夹，双击 <strong>run.command</strong>。启动完成后浏览器会自动打开完整界面。</p>
+        <a href="http://127.0.0.1:8765/">服务已启动，打开界面</a>
+      </section>
+
+      <section class="upload-card" id="upload-card" aria-labelledby="upload-title">
+        <div class="upload-heading">
+          <span class="step-number">1</span>
+          <div>
+            <h2 id="upload-title">选择一首歌</h2>
+            <p>支持 WAV、MP3、FLAC、M4A、OGG，最长 15 分钟</p>
+          </div>
+        </div>
+
+        <label class="drop-zone" id="drop-zone" for="file-input">
+          <input id="file-input" type="file" accept=".wav,.mp3,.flac,.m4a,.ogg,audio/*" />
+          <span class="choose-button">选择音频</span>
+          <span class="drop-hint">也可以把文件拖到这里</span>
+        </label>
+
+        <div class="upload-selection" id="upload-selection" hidden>
+          <div class="selected-file">
+            <span class="file-icon" aria-hidden="true">♫</span>
+            <div>
+              <strong id="selected-name"></strong>
+              <span id="selected-meta"></span>
+            </div>
+          </div>
+          <button class="primary-button" id="upload-button" type="button">开始分离鼓轨</button>
+        </div>
+        <p class="notice" id="upload-notice" role="status" aria-live="polite"></p>
+
+        <div class="simple-guide">
+          <span><b>1</b> 选择音频</span>
+          <i>→</i>
+          <span><b>2</b> 开始分离</span>
+          <i>→</i>
+          <span><b>3</b> 试听并下载</span>
+        </div>
+      </section>
+
+      <section class="workspace" id="workspace" aria-labelledby="workspace-title">
+        <div class="workspace-heading">
+          <h2 id="workspace-title">处理记录</h2>
+          <p><span id="job-count">0</span> 个任务 · <span id="storage-total">0 B</span></p>
+        </div>
+        <div class="connection-warning" id="connection-warning" hidden>
+          本地服务暂时无法连接，正在重试。
+        </div>
+        <div class="empty-state" id="empty-state">
+          <span aria-hidden="true">♪</span>
+          <p>选择音频后，处理进度会显示在这里。</p>
+        </div>
+        <div class="job-list" id="job-list"></div>
+      </section>
+
+      <footer>高质量模式 · HTDemucs FT · 输出 MP3 256 kbps</footer>
+    </main>
+
+    <template id="job-template">
+      <article class="job-card">
+        <div class="job-topline">
+          <div class="job-title-wrap">
+            <div class="job-status-icon" aria-hidden="true"></div>
+            <div>
+              <h3 class="job-name"></h3>
+              <p class="job-meta"></p>
+            </div>
+          </div>
+          <span class="status-pill"></span>
+        </div>
+
+        <div class="progress-area">
+          <div class="progress-copy">
+            <span class="stage-text"></span>
+            <span class="elapsed-text"></span>
+          </div>
+          <div class="progress-track"><div class="progress-value"></div></div>
+        </div>
+
+        <div class="message error-message" hidden></div>
+        <div class="message warning-message" hidden></div>
+
+        <div class="players" hidden>
+          <div class="player-row accent-row">
+            <div class="player-label"><strong>鼓轨</strong><span>只保留鼓声 · <i class="format-label">轻量 MP3</i></span></div>
+            <audio class="audio-drums" controls preload="metadata"></audio>
+            <a class="download-link download-drums">下载</a>
+          </div>
+          <div class="player-row">
+            <div class="player-label"><strong>去鼓伴奏</strong><span>移除鼓声 · <i class="format-label">轻量 MP3</i></span></div>
+            <audio class="audio-no-drums" controls preload="metadata"></audio>
+            <a class="download-link download-no-drums">下载</a>
+          </div>
+        </div>
+
+        <div class="job-actions">
+          <button class="text-button cancel-button" type="button">取消</button>
+          <button class="text-button retry-button" type="button">重新处理</button>
+          <button class="text-button compress-button" type="button">压缩旧文件</button>
+          <button class="text-button danger-button delete-button" type="button">删除</button>
+        </div>
+      </article>
+    </template>
+
+    <script src="./app.js" defer></script>
+  </body>
+</html>
