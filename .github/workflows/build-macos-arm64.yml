@@ -68,7 +68,10 @@ jobs:
             --password "$APPLE_APP_PASSWORD" \
             --wait
           xcrun stapler staple "$DMG"
-          shasum -a 256 "$DMG" > "$DMG.sha256"
+          (
+            cd dist
+            shasum -a 256 AI-Audio-Separator-macOS-arm64.dmg > AI-Audio-Separator-macOS-arm64.dmg.sha256
+          )
 
       - uses: actions/upload-artifact@v4
         with:
