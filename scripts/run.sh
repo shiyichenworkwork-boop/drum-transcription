@@ -24,9 +24,28 @@ fi
 export UV_CACHE_DIR="$RUNTIME_DIR/cache"
 export UV_PYTHON_INSTALL_DIR="$RUNTIME_DIR/python"
 
-echo "正在检查 Python 3.11 与项目依赖…"
-"$UV_BIN" python install 3.11
-"$UV_BIN" sync --python 3.11
+DEPENDENCY_MARKER="$RUNTIME_DIR/dependencies.sha256"
+DEPENDENCY_FINGERPRINT="$({ shasum -a 256 "$PROJECT_DIR/pyproject.toml" "$PROJECT_DIR/uv.lock"; } | shasum -a 256 | awk '{print $1}')"
+INSTALLED_FINGERPRINT=""
+if [[ -f "$DEPENDENCY_MARKER" ]]; then
+  IFS= read -r INSTALLED_FINGERPRINT < "$DEPENDENCY_MARKER"
+fi
+
+if [[ -z "$INSTALLED_FINGERPRINT" && -x "$PROJECT_DIR/.venv/bin/python" && -x "$PROJECT_DIR/.venv/bin/uvicorn" ]]; then
+  if "$UV_BIN" sync --check --offline --python "$PROJECT_DIR/.venv/bin/python" >/dev/null 2>&1; then
+    print -r -- "$DEPENDENCY_FINGERPRINT" > "$DEPENDENCY_MARKER"
+    INSTALLED_FINGERPRINT="$DEPENDENCY_FINGERPRINT"
+  fi
+fi
+
+if [[ ! -x "$PROJECT_DIR/.venv/bin/python" || ! -x "$PROJECT_DIR/.venv/bin/uvicorn" || "$INSTALLED_FINGERPRINT" != "$DEPENDENCY_FINGERPRINT" ]]; then
+  echo "正在检查 Python 3.11 与项目依赖…"
+  "$UV_BIN" python install 3.11
+  "$UV_BIN" sync --python 3.11
+  print -r -- "$DEPENDENCY_FINGERPRINT" > "$DEPENDENCY_MARKER"
+else
+  echo "项目依赖没有变化，跳过安装检查。"
+fi
 
 if [[ "${1:-}" == "--setup-only" ]]; then
   echo "项目运行环境安装完成。"
@@ -40,7 +59,15 @@ echo ""
 cd "$PROJECT_DIR"
 
 if [[ "${DRUM_SEPARATOR_NO_OPEN:-0}" != "1" ]]; then
-  (sleep 2; open "http://127.0.0.1:8765") >/dev/null 2>&1 &
+  (
+    for _ in {1..120}; do
+      if curl -fsS "http://127.0.0.1:8765/api/health" >/dev/null 2>&1; then
+        open "http://127.0.0.1:8765"
+        exit 0
+      fi
+      sleep 0.25
+    done
+  ) >/dev/null 2>&1 &
 fi
 
-exec "$UV_BIN" run uvicorn app.main:app --host 127.0.0.1 --port 8765 --no-access-log
+exec "$PROJECT_DIR/.venv/bin/uvicorn" app.main:app --host 127.0.0.1 --port 8765 --no-access-log

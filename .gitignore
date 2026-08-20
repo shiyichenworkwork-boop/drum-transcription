@@ -10,3 +10,4 @@ output/
 dist/
 build/
 .tools/
+packaging/macos/AppIcon.png

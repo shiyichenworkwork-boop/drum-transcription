@@ -5,9 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="dark" />
     <meta name="theme-color" content="#151412" />
-    <title>鼓轨分离</title>
+    <title>AI 音轨分离</title>
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./styles.css?v=20260818.1" />
   </head>
   <body>
     <main class="shell">
@@ -15,7 +15,7 @@
         <div class="brand">
           <div class="brand-icon" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
           <div>
-            <h1>鼓轨分离</h1>
+            <h1>AI 音轨分离</h1>
             <p>本地处理，音频不会上传到网络</p>
           </div>
         </div>
@@ -33,10 +33,34 @@
         <div class="upload-heading">
           <span class="step-number">1</span>
           <div>
-            <h2 id="upload-title">选择一首歌</h2>
-            <p>支持 WAV、MP3、FLAC、M4A、OGG，最长 15 分钟</p>
+            <h2 id="upload-title">选择分轨模块</h2>
+            <p>两个模块分别使用专用模型，任务与结果独立保存</p>
           </div>
         </div>
+
+        <fieldset class="module-picker" id="module-picker">
+          <legend>选择处理方式</legend>
+          <label class="module-option">
+            <input type="radio" name="separation-kind" value="drums" checked />
+            <span class="module-option-icon" aria-hidden="true">鼓</span>
+            <span class="module-option-copy">
+              <strong>分离鼓轨</strong>
+              <small>HTDemucs FT · 鼓轨 + 去鼓伴奏 + 鼓点 MIDI</small>
+            </span>
+            <i>已选择</i>
+          </label>
+          <label class="module-option vocal-option">
+            <input type="radio" name="separation-kind" value="vocals" />
+            <span class="module-option-icon" aria-hidden="true">声</span>
+            <span class="module-option-copy">
+              <strong>分离人声</strong>
+              <small>MelBand RoFormer Kim · 人声 + 无人声伴奏</small>
+            </span>
+            <i>选择</i>
+          </label>
+        </fieldset>
+
+        <p class="format-hint">支持 WAV、MP3、FLAC、M4A、OGG，最长 15 分钟</p>
 
         <label class="drop-zone" id="drop-zone" for="file-input">
           <input id="file-input" type="file" accept=".wav,.mp3,.flac,.m4a,.ogg,audio/*" />
@@ -80,7 +104,7 @@
         <div class="job-list" id="job-list"></div>
       </section>
 
-      <footer>高质量模式 · HTDemucs FT · MP3 256 kbps · 鼓 MIDI Beta</footer>
+      <footer>HTDemucs FT 鼓轨 · MelBand RoFormer 人声 · ADTOF / STRUM 鼓点 MIDI</footer>
     </main>
 
     <template id="job-template">
@@ -108,24 +132,84 @@
         <div class="message warning-message" hidden></div>
 
         <div class="players" hidden>
-          <div class="player-row accent-row">
-            <div class="player-label"><strong>鼓轨</strong><span>只保留鼓声 · <i class="format-label">轻量 MP3</i></span></div>
-            <audio class="audio-drums" controls preload="metadata"></audio>
-            <a class="download-link download-drums">下载</a>
-          </div>
-          <div class="player-row">
-            <div class="player-label"><strong>去鼓伴奏</strong><span>移除鼓声 · <i class="format-label">轻量 MP3</i></span></div>
-            <audio class="audio-no-drums" controls preload="metadata"></audio>
-            <a class="download-link download-no-drums">下载</a>
-          </div>
+          <div class="drum-results">
+            <div class="player-row accent-row">
+              <div class="player-label"><strong>鼓轨</strong><span>只保留鼓声 · <i class="format-label">轻量 MP3</i></span></div>
+              <audio class="audio-drums" controls preload="metadata"></audio>
+              <a class="download-link download-drums">下载</a>
+            </div>
+            <div class="player-row">
+              <div class="player-label"><strong>去鼓伴奏</strong><span>移除鼓声 · <i class="format-label">轻量 MP3</i></span></div>
+              <audio class="audio-no-drums" controls preload="metadata"></audio>
+              <a class="download-link download-no-drums">下载</a>
+            </div>
           <div class="midi-row">
             <span class="midi-badge" aria-hidden="true">MIDI</span>
             <div class="midi-copy">
-              <strong>鼓点 MIDI <i>Beta</i></strong>
-              <span class="midi-meta">底鼓 · 军鼓 · 闭镲</span>
+              <strong>鼓点 MIDI <i>Model</i></strong>
+              <span class="midi-meta">快速五鼓件 / STRUM 高精度八鼓件</span>
             </div>
-            <button class="midi-generate-button" type="button">生成 MIDI</button>
-            <a class="download-link midi-download" hidden>下载 .mid</a>
+            <div class="midi-actions">
+              <label class="midi-option-control" title="STRUM 会下载约 1GB 鼓模型，并在 CPU 上进行高精度识别">
+                <span>识别模型</span>
+                <select class="midi-model" aria-label="MIDI 识别模型">
+                  <option value="adtof">快速 · ADTOF</option>
+                  <option value="strum">高精度 · STRUM</option>
+                </select>
+              </label>
+              <label class="midi-option-control" title="自动会根据重拍推断；三拍子或复拍子判断不稳时可直接指定">
+                <span>拍号</span>
+                <select class="midi-meter" aria-label="MIDI 拍号">
+                  <option value="auto">自动</option>
+                  <option value="2/4">2/4</option>
+                  <option value="3/4">3/4</option>
+                  <option value="4/4">4/4</option>
+                  <option value="6/8">6/8</option>
+                  <option value="9/8">9/8</option>
+                  <option value="12/8">12/8</option>
+                </select>
+              </label>
+              <label class="bar-offset-control" title="只调整小节线，鼓点和速度保持原位">
+                <span>小节偏移</span>
+                <select class="midi-bar-offset" aria-label="MIDI 小节偏移">
+                  <option value="0">自动</option>
+                  <option value="-2">前移 2 拍</option>
+                  <option value="-1">前移 1 拍</option>
+                  <option value="1">后移 1 拍</option>
+                  <option value="2">后移 2 拍</option>
+                </select>
+              </label>
+              <button class="midi-generate-button" type="button">生成 MIDI</button>
+              <a class="download-link midi-download" hidden>下载 .mid</a>
+            </div>
+            <div class="midi-preview" hidden>
+              <div class="midi-preview-heading">
+                <strong>MIDI 节奏预览</strong>
+                <span>显示前 4 个有鼓点的小节</span>
+              </div>
+              <div class="midi-preview-canvas" role="img" aria-label="鼓点 MIDI 前四小节预览"></div>
+              <div class="midi-preview-navigation">
+                <label>
+                  <span>预览位置</span>
+                  <input class="midi-window-slider" type="range" min="1" max="1" value="1" step="1" aria-label="移动 MIDI 预览窗口" />
+                </label>
+                <output class="midi-window-value">第 1 小节</output>
+              </div>
+            </div>
+          </div>
+          </div>
+
+          <div class="vocal-results" hidden>
+            <div class="player-row vocal-accent-row">
+              <div class="player-label"><strong>人声</strong><span>主唱与和声 · <i class="format-label">轻量 MP3</i></span></div>
+              <audio class="audio-vocals" controls preload="metadata"></audio>
+              <a class="download-link download-vocals">下载</a>
+            </div>
+            <div class="player-row">
+              <div class="player-label"><strong>无人声伴奏</strong><span>已移除人声 · <i class="format-label">轻量 MP3</i></span></div>
+              <audio class="audio-instrumental" controls preload="metadata"></audio>
+              <a class="download-link download-instrumental">下载</a>
+            </div>
           </div>
         </div>
 
@@ -138,6 +222,6 @@
       </article>
     </template>
 
-    <script src="./app.js" defer></script>
+    <script src="./app.js?v=20260818.2" defer></script>
   </body>
 </html>

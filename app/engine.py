@@ -5,7 +5,6 @@ import os
 import re
 import shutil
 import signal
-import sys
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,6 +18,7 @@ from app.audio import (
     validate_wav,
 )
 from app.config import Settings
+from app.runtime import module_command
 
 
 ProgressCallback = Callable[[str, int, str | None], Awaitable[None]]
@@ -35,10 +35,12 @@ class SeparationCancelled(SeparationError):
 
 @dataclass(slots=True)
 class SeparationResult:
-    drums_path: Path
-    no_drums_path: Path
     storage_bytes: int
     warnings: list[str]
+    drums_path: Path | None = None
+    no_drums_path: Path | None = None
+    vocals_path: Path | None = None
+    instrumental_path: Path | None = None
 
 
 class SeparationEngine(ABC):
@@ -127,9 +129,7 @@ class DemucsEngine(SeparationEngine):
             env["PATH"] = ffmpeg_dir + os.pathsep + env.get("PATH", "")
             await self._run_process(
                 job_id,
-                [
-                    sys.executable,
-                    "-m",
+                module_command(
                     "demucs",
                     "-n",
                     self.settings.model_name,
@@ -142,7 +142,7 @@ class DemucsEngine(SeparationEngine):
                     "--out",
                     str(separated_dir),
                     str(normalized_path),
-                ],
+                ),
                 progress,
                 stage="separating",
                 env=env,
@@ -275,6 +275,7 @@ class DemucsEngine(SeparationEngine):
         *,
         stage: str,
         env: dict[str, str] | None = None,
+        progress_message: str = "正在分离鼓轨",
     ) -> str:
         await self._raise_if_cancelled(job_id)
         process = await asyncio.create_subprocess_exec(
@@ -305,7 +306,7 @@ class DemucsEngine(SeparationEngine):
                         await progress(
                             "separating",
                             15 + round(raw_percent * 0.75),
-                            "正在分离鼓轨",
+                            progress_message,
                         )
             return_code = await process.wait()
         except asyncio.CancelledError:

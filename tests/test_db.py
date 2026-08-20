@@ -46,10 +46,33 @@ def test_startup_recovery_marks_running_failed_and_returns_queue(tmp_path: Path)
     )
 
     queued = repository.prepare_startup_recovery()
-    assert queued == ["queued"]
+    assert queued == [("queued", "separation")]
     interrupted = repository.require("running")
     assert interrupted.status == JobStatus.FAILED.value
     assert "重新处理" in (interrupted.error or "")
+
+
+def test_startup_recovery_restores_queued_operation_and_fails_running_operation(
+    tmp_path: Path,
+) -> None:
+    repository = JobRepository(tmp_path / "jobs.sqlite3")
+    repository.initialize()
+    for job_id in ("midi-queued", "compress-running"):
+        create_record(repository, job_id, job_id)
+        repository.update(
+            job_id,
+            status=JobStatus.COMPLETED.value,
+            progress=100,
+            operation_kind="midi" if job_id == "midi-queued" else "compress",
+            operation_state="queued" if job_id == "midi-queued" else "running",
+        )
+
+    queued = repository.prepare_startup_recovery()
+
+    assert queued == [("midi-queued", "midi")]
+    interrupted = repository.require("compress-running")
+    assert interrupted.operation_state == "failed"
+    assert "退出" in (interrupted.operation_error or "")
 
 
 def test_cache_finds_active_or_completed_job(tmp_path: Path) -> None:
@@ -57,4 +80,3 @@ def test_cache_finds_active_or_completed_job(tmp_path: Path) -> None:
     repository.initialize()
     create_record(repository, "job-1", "same")
     assert repository.find_reusable("same").id == "job-1"
-
