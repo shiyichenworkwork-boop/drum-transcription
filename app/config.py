@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
 from dataclasses import dataclass
 from pathlib import Path
+
+from app.runtime import bundle_root, is_frozen
 
 
 @dataclass(slots=True)
@@ -12,6 +15,8 @@ class Settings:
     data_dir: Path
     model_name: str = "htdemucs_ft"
     model_version: str = "demucs-4.0.1/htdemucs_ft"
+    vocal_model_name: str = "melband-roformer-kim-vocals"
+    vocal_model_version: str = "melband-roformer-infer-0.1.5/kim-vocals"
     max_upload_bytes: int = 500 * 1024 * 1024
     max_duration_seconds: float = 15 * 60
     min_free_disk_bytes: int = 2 * 1024 * 1024 * 1024
@@ -26,9 +31,18 @@ class Settings:
 
     @classmethod
     def from_env(cls) -> "Settings":
-        project_root = Path(__file__).resolve().parent.parent
+        project_root = bundle_root()
+        if is_frozen() and sys.platform == "darwin":
+            default_data_dir = (
+                Path.home()
+                / "Library"
+                / "Application Support"
+                / "AI Audio Separator"
+            )
+        else:
+            default_data_dir = project_root / "data"
         data_dir = Path(
-            os.environ.get("DRUM_SEPARATOR_DATA_DIR", project_root / "data")
+            os.environ.get("DRUM_SEPARATOR_DATA_DIR", default_data_dir)
         ).expanduser().resolve()
         return cls(
             project_root=project_root,

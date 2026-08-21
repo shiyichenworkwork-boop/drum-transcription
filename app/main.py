@@ -9,7 +9,8 @@ from typing import AsyncIterator, Literal
 from urllib.parse import quote
 from uuid import uuid4
 
-from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
+import mido
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -26,7 +27,15 @@ from app.audio import (
 from app.config import Settings
 from app.db import JobRecord, JobRepository
 from app.engine import DemucsEngine, SeparationEngine
+from app.job_files import (
+    JobFileNotFound,
+    audio_media_type as _audio_media_type,
+    resolve_job_file,
+)
 from app.manager import JobConflictError, JobManager
+from app.midi import DrumTranscriber
+from app.strum import StrumTranscriber
+from app.vocal_engine import MelBandRoformerEngine
 from app.schemas import (
     ActionResponse,
     JobFiles,
@@ -56,6 +65,11 @@ def job_response(record: JobRecord) -> JobResponse:
     original_exists = Path(record.original_path).is_file()
     drums_exists = bool(record.drums_path and Path(record.drums_path).is_file())
     no_drums_exists = bool(record.no_drums_path and Path(record.no_drums_path).is_file())
+    vocals_exists = bool(record.vocals_path and Path(record.vocals_path).is_file())
+    instrumental_exists = bool(
+        record.instrumental_path and Path(record.instrumental_path).is_file()
+    )
+    midi_exists = bool(record.midi_path and Path(record.midi_path).is_file())
     return JobResponse(
         id=record.id,
         original_name=record.original_name,
@@ -68,11 +82,39 @@ def job_response(record: JobRecord) -> JobResponse:
         input_size_bytes=record.input_size_bytes,
         storage_bytes=record.storage_bytes,
         model_name=record.model_name,
+        separation_kind=record.separation_kind,
         output_format=(
-            Path(record.drums_path).suffix.lower().lstrip(".")
-            if record.drums_path
+            Path(
+                record.drums_path
+                or record.vocals_path
+                or record.no_drums_path
+                or record.instrumental_path
+            ).suffix.lower().lstrip(".")
+            if (
+                record.drums_path
+                or record.vocals_path
+                or record.no_drums_path
+                or record.instrumental_path
+            )
             else None
         ),
+        midi_event_count=record.midi_event_count,
+        midi_tempo_bpm=record.midi_tempo_bpm,
+        midi_engine=record.midi_engine,
+        midi_quantized=bool(record.midi_quantized),
+        midi_warning=record.midi_warning,
+        midi_beats_per_bar=record.midi_beats_per_bar,
+        midi_beat_unit=record.midi_beat_unit,
+        midi_bar_offset_beats=record.midi_bar_offset_beats,
+        midi_model=record.midi_model,
+        midi_meter=record.midi_meter,
+        operation_kind=record.operation_kind,
+        operation_state=record.operation_state,
+        operation_stage=record.operation_stage,
+        operation_progress=record.operation_progress,
+        operation_error=record.operation_error,
+        operation_started_at=record.operation_started_at,
+        operation_finished_at=record.operation_finished_at,
         created_at=record.created_at,
         updated_at=record.updated_at,
         started_at=record.started_at,
@@ -84,43 +126,20 @@ def job_response(record: JobRecord) -> JobResponse:
             original=_file_url(record.id, "original", original_exists),
             drums=_file_url(record.id, "drums", drums_exists),
             no_drums=_file_url(record.id, "no_drums", no_drums_exists),
+            vocals=_file_url(record.id, "vocals", vocals_exists),
+            instrumental=_file_url(
+                record.id, "instrumental", instrumental_exists
+            ),
+            midi=_file_url(record.id, "midi", midi_exists),
         ),
     )
 
 
 def _safe_job_file(settings: Settings, record: JobRecord, kind: str) -> tuple[Path, str, str]:
-    if kind == "original":
-        path = Path(record.original_path)
-        filename = record.original_name
-        media_type = record.mime_type or "application/octet-stream"
-    elif kind == "drums" and record.drums_path:
-        path = Path(record.drums_path)
-        suffix = path.suffix.lower()
-        filename = f"{Path(record.original_name).stem}-drums{suffix}"
-        media_type = _audio_media_type(suffix)
-    elif kind == "no_drums" and record.no_drums_path:
-        path = Path(record.no_drums_path)
-        suffix = path.suffix.lower()
-        filename = f"{Path(record.original_name).stem}-no-drums{suffix}"
-        media_type = _audio_media_type(suffix)
-    else:
-        raise HTTPException(status_code=404, detail="文件不存在。")
-
-    resolved = path.resolve()
-    jobs_root = settings.jobs_dir.resolve()
-    if jobs_root not in resolved.parents or not resolved.is_file():
-        raise HTTPException(status_code=404, detail="文件不存在。")
-    return resolved, sanitize_display_name(filename), media_type
-
-
-def _audio_media_type(suffix: str) -> str:
-    return {
-        ".mp3": "audio/mpeg",
-        ".wav": "audio/wav",
-        ".flac": "audio/flac",
-        ".m4a": "audio/mp4",
-        ".ogg": "audio/ogg",
-    }.get(suffix, "application/octet-stream")
+    try:
+        return resolve_job_file(settings, record, kind)
+    except JobFileNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 def _parse_range(range_header: str, size: int) -> tuple[int, int]:
@@ -187,13 +206,26 @@ def ranged_file_response(
 def create_app(
     settings: Settings | None = None,
     engine: SeparationEngine | None = None,
+    vocal_engine: SeparationEngine | None = None,
+    transcriber: DrumTranscriber | None = None,
+    strum_transcriber: StrumTranscriber | None = None,
 ) -> FastAPI:
     settings = settings or Settings.from_env()
     settings.ensure_directories()
     repository = JobRepository(settings.database_path)
     repository.initialize()
     selected_engine = engine or DemucsEngine(settings)
-    manager = JobManager(settings, repository, selected_engine)
+    selected_vocal_engine = vocal_engine or (
+        selected_engine if engine is not None else MelBandRoformerEngine(settings)
+    )
+    manager = JobManager(
+        settings,
+        repository,
+        selected_engine,
+        vocal_engine=selected_vocal_engine,
+        transcriber=transcriber,
+        strum_transcriber=strum_transcriber,
+    )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -205,7 +237,7 @@ def create_app(
 
     app = FastAPI(
         title="鼓点拆解室",
-        version="0.1.0",
+        version="0.2.0",
         docs_url="/api/docs",
         redoc_url=None,
         lifespan=lifespan,
@@ -220,10 +252,17 @@ def create_app(
 
     @app.get("/api/health")
     async def health() -> dict[str, str]:
-        return {"status": "ok", "model": settings.model_name}
+        return {
+            "status": "ok",
+            "drum_model": settings.model_name,
+            "vocal_model": settings.vocal_model_name,
+        }
 
     @app.post("/api/jobs", response_model=JobResponse, status_code=201)
-    async def create_job(file: UploadFile = File(...)) -> JobResponse:
+    async def create_job(
+        file: UploadFile = File(...),
+        separation_kind: Literal["drums", "vocals"] = Form("drums"),
+    ) -> JobResponse:
         display_name = sanitize_display_name(file.filename)
         suffix = Path(display_name).suffix.lower()
         if suffix not in ALLOWED_SUFFIXES:
@@ -243,20 +282,37 @@ def create_app(
             if info.duration_seconds > settings.max_duration_seconds:
                 raise AudioValidationError("音频超过 15 分钟限制。")
             await assert_decodable(settings.resolve_ffmpeg(), original_path)
+            if separation_kind == "vocals":
+                model_name = settings.vocal_model_name
+                engine_version = settings.vocal_model_version
+                engine_parameters = "two-stems=vocals+instrumental:cpu"
+            else:
+                model_name = settings.model_name
+                engine_version = settings.model_version
+                engine_parameters = "two-stems=drums:overlap=0.25:cpu"
             cache_source = (
-                f"{saved.sha256}:{settings.model_version}:two-stems=drums:"
-                f"overlap=0.25:pcm16:{settings.sample_rate}:"
+                f"{saved.sha256}:{separation_kind}:{engine_version}:"
+                f"{engine_parameters}:pcm16:{settings.sample_rate}:"
                 f"output={settings.output_format}:{settings.output_bitrate}"
             )
             cache_key = hashlib.sha256(cache_source.encode()).hexdigest()
             reusable = repository.find_reusable(cache_key)
             if reusable:
-                if reusable.status != JobStatus.COMPLETED.value or (
-                    reusable.drums_path
-                    and reusable.no_drums_path
-                    and Path(reusable.drums_path).is_file()
-                    and Path(reusable.no_drums_path).is_file()
-                ):
+                if separation_kind == "vocals":
+                    complete_files = (
+                        reusable.vocals_path
+                        and reusable.instrumental_path
+                        and Path(reusable.vocals_path).is_file()
+                        and Path(reusable.instrumental_path).is_file()
+                    )
+                else:
+                    complete_files = (
+                        reusable.drums_path
+                        and reusable.no_drums_path
+                        and Path(reusable.drums_path).is_file()
+                        and Path(reusable.no_drums_path).is_file()
+                    )
+                if reusable.status != JobStatus.COMPLETED.value or complete_files:
                     remove_job_directory(job_dir, settings.jobs_dir)
                     return job_response(reusable)
 
@@ -271,7 +327,8 @@ def create_app(
                 channels=info.channels,
                 sha256=saved.sha256,
                 cache_key=cache_key,
-                model_name=settings.model_name,
+                model_name=model_name,
+                separation_kind=separation_kind,
             )
             await manager.enqueue(job_id)
             return job_response(record)
@@ -317,6 +374,47 @@ def create_app(
         except JobConflictError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
+    @app.post("/api/jobs/{job_id}/midi", response_model=JobResponse)
+    async def generate_midi(
+        job_id: str,
+        force: bool = Query(False),
+        bar_offset_beats: int = Query(0, ge=-2, le=2),
+        midi_model: Literal["adtof", "strum"] = Query("adtof"),
+        meter: Literal[
+            "auto", "2/4", "3/4", "4/4", "6/8", "9/8", "12/8"
+        ] = Query("auto"),
+    ) -> JobResponse:
+        try:
+            return job_response(
+                await manager.generate_midi(
+                    job_id,
+                    force=force,
+                    bar_offset_beats=bar_offset_beats,
+                    midi_model=midi_model,
+                    meter=meter,
+                )
+            )
+        except JobConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.get("/api/jobs/{job_id}/midi/preview")
+    async def preview_midi(
+        job_id: str,
+        bars: int = Query(4, ge=1, le=8),
+        start_bar: int | None = Query(None, ge=0),
+    ) -> dict[str, object]:
+        record = repository.require(job_id)
+        if record.separation_kind != "drums":
+            raise HTTPException(status_code=409, detail="人声分轨任务没有鼓点 MIDI。")
+        if not record.midi_path or not Path(record.midi_path).is_file():
+            raise HTTPException(status_code=404, detail="请先生成鼓点 MIDI。")
+        return build_midi_preview(
+            Path(record.midi_path),
+            record,
+            bars=bars,
+            requested_start_bar=start_bar,
+        )
+
     @app.delete("/api/jobs/{job_id}", response_model=ActionResponse)
     async def delete_job(job_id: str) -> ActionResponse:
         try:
@@ -329,7 +427,9 @@ def create_app(
     async def get_job_file(
         request: Request,
         job_id: str,
-        file_kind: Literal["original", "drums", "no_drums"],
+        file_kind: Literal[
+            "original", "drums", "no_drums", "vocals", "instrumental", "midi"
+        ],
         download: bool = Query(False),
     ) -> Response:
         record = repository.require(job_id)
@@ -340,21 +440,151 @@ def create_app(
 
     @app.get("/styles.css", include_in_schema=False)
     async def styles() -> FileResponse:
-        return FileResponse(settings.static_dir / "styles.css", media_type="text/css")
+        return FileResponse(
+            settings.static_dir / "styles.css",
+            media_type="text/css",
+            headers={"Cache-Control": "public, max-age=31536000, immutable"},
+        )
 
     @app.get("/app.js", include_in_schema=False)
     async def javascript() -> FileResponse:
-        return FileResponse(settings.static_dir / "app.js", media_type="text/javascript")
+        return FileResponse(
+            settings.static_dir / "app.js",
+            media_type="text/javascript",
+            headers={"Cache-Control": "public, max-age=31536000, immutable"},
+        )
 
     @app.get("/favicon.svg", include_in_schema=False)
     async def favicon() -> FileResponse:
-        return FileResponse(settings.static_dir / "favicon.svg", media_type="image/svg+xml")
+        return FileResponse(
+            settings.static_dir / "favicon.svg",
+            media_type="image/svg+xml",
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
 
     @app.get("/", include_in_schema=False)
     async def index() -> FileResponse:
-        return FileResponse(settings.static_dir / "index.html")
+        return FileResponse(
+            settings.static_dir / "index.html",
+            headers={"Cache-Control": "no-cache, max-age=0, must-revalidate"},
+        )
 
     return app
+
+
+_DRUM_LANES = (
+    ("crash", "吊镲", {49, 52, 55, 57}),
+    ("ride", "叮叮镲", {51, 53, 59}),
+    ("hihat", "踩镲", {42, 44, 46}),
+    ("high_tom", "高通鼓", {48, 50}),
+    ("mid_tom", "中通鼓", {45, 47}),
+    ("snare", "军鼓", {37, 38, 39, 40}),
+    ("floor_tom", "落地通鼓", {41, 43}),
+    ("kick", "底鼓", {35, 36}),
+)
+
+
+def build_midi_preview(
+    path: Path,
+    record: JobRecord,
+    *,
+    bars: int = 4,
+    requested_start_bar: int | None = None,
+) -> dict[str, object]:
+    midi = mido.MidiFile(path)
+    ticks_per_beat = midi.ticks_per_beat or 480
+    notes: list[tuple[int, int, int]] = []
+    for track in midi.tracks:
+        absolute_tick = 0
+        for message in track:
+            absolute_tick += message.time
+            if message.type == "note_on" and message.velocity > 0:
+                notes.append((absolute_tick, message.note, message.velocity))
+    notes.sort()
+    if not notes:
+        return {
+            "ticks_per_beat": ticks_per_beat,
+            "beats_per_bar": record.midi_beats_per_bar or 4,
+            "beat_unit": record.midi_beat_unit or 4,
+            "start_bar": 1,
+            "min_start_bar": 1,
+            "max_start_bar": 1,
+            "total_bars": 1,
+            "bar_count": bars,
+            "notes": [],
+            "lanes": [
+                {"id": lane_id, "label": label}
+                for lane_id, label, _ in _DRUM_LANES
+            ],
+        }
+
+    beats_per_bar = record.midi_beats_per_bar or 4
+    beat_unit = record.midi_beat_unit or 4
+    unit_ticks = ticks_per_beat * 4 / beat_unit
+    bar_ticks = round(beats_per_bar * unit_ticks)
+    pickup_ticks = (
+        record.midi_bar_offset_beats % beats_per_bar
+    ) * unit_ticks
+    pickup_ticks = round(pickup_ticks)
+    first_tick = notes[0][0]
+    last_tick = notes[-1][0]
+    min_start_bar = 0 if pickup_ticks else 1
+    last_bar = (
+        0
+        if pickup_ticks and last_tick < pickup_ticks
+        else max(1, ((last_tick - pickup_ticks) // bar_ticks) + 1)
+    )
+    total_bars = max(1, last_bar + (1 if pickup_ticks else 0))
+    max_start_bar = max(min_start_bar, last_bar - bars + 1)
+
+    if requested_start_bar is not None:
+        start_bar = max(min_start_bar, min(requested_start_bar, max_start_bar))
+        start_tick = (
+            0
+            if start_bar == 0
+            else pickup_ticks + (start_bar - 1) * bar_ticks
+        )
+    elif pickup_ticks and first_tick < pickup_ticks:
+        start_tick = 0
+        start_bar = 0
+    else:
+        origin = pickup_ticks
+        bar_index = max(0, (first_tick - origin) // bar_ticks)
+        start_tick = origin + bar_index * bar_ticks
+        start_bar = bar_index + 1
+    end_tick = start_tick + bars * bar_ticks
+
+    def lane_for(note: int) -> str:
+        for lane_id, _, note_numbers in _DRUM_LANES:
+            if note in note_numbers:
+                return lane_id
+        return "snare"
+
+    visible_notes = [
+        {
+            "tick": tick - start_tick,
+            "note": note,
+            "velocity": velocity,
+            "lane": lane_for(note),
+        }
+        for tick, note, velocity in notes
+        if start_tick <= tick < end_tick
+    ]
+    return {
+        "ticks_per_beat": ticks_per_beat,
+        "beats_per_bar": beats_per_bar,
+        "beat_unit": beat_unit,
+        "start_bar": start_bar,
+        "min_start_bar": min_start_bar,
+        "max_start_bar": max_start_bar,
+        "total_bars": total_bars,
+        "bar_count": bars,
+        "notes": visible_notes,
+        "lanes": [
+            {"id": lane_id, "label": label}
+            for lane_id, label, _ in _DRUM_LANES
+        ],
+    }
 
 
 app = create_app()
