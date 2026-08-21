@@ -177,6 +177,15 @@ def ensure_local_service(timeout: float = 30.0) -> subprocess.Popen[bytes] | Non
     raise RuntimeError(f"本地服务启动超时，请查看日志：{log_path}")
 
 
+def prepare_frozen_multiprocessing() -> None:
+    """Route PyInstaller multiprocessing helpers before desktop startup."""
+    if not is_frozen():
+        return
+    import multiprocessing
+
+    multiprocessing.freeze_support()
+
+
 def main() -> None:
     try:
         import webview
@@ -225,5 +234,6 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    prepare_frozen_multiprocessing()
     if not dispatch_worker():
         main()

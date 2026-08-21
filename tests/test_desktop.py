@@ -5,12 +5,42 @@ from pathlib import Path
 from app.db import JobRepository
 from app import runtime
 from app.schemas import JobStatus
-from scripts.desktop import DesktopApi, ensure_local_service
+from scripts.desktop import (
+    DesktopApi,
+    ensure_local_service,
+    prepare_frozen_multiprocessing,
+)
 
 
 def test_service_check_reuses_running_server(monkeypatch) -> None:
     monkeypatch.setattr("scripts.desktop.service_is_ready", lambda: True)
     assert ensure_local_service() is None
+
+
+def test_frozen_desktop_prepares_multiprocessing_helpers(monkeypatch) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr("scripts.desktop.is_frozen", lambda: True)
+    monkeypatch.setattr(
+        "multiprocessing.freeze_support",
+        lambda: calls.append("freeze-support"),
+    )
+
+    prepare_frozen_multiprocessing()
+
+    assert calls == ["freeze-support"]
+
+
+def test_source_desktop_skips_frozen_multiprocessing(monkeypatch) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr("scripts.desktop.is_frozen", lambda: False)
+    monkeypatch.setattr(
+        "multiprocessing.freeze_support",
+        lambda: calls.append("freeze-support"),
+    )
+
+    prepare_frozen_multiprocessing()
+
+    assert calls == []
 
 
 def test_frozen_worker_disables_numba_jit(monkeypatch) -> None:
